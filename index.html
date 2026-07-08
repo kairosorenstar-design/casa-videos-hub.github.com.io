@@ -417,27 +417,47 @@ function renderAdsForStep(currentStep){
 /* =========================================================
    DETECCIÓN DE BLOQUEADOR DE ANUNCIOS
    -----------------------------------------------------------
-   Se crea un elemento "cebo" con nombres de clase típicos que
-   las listas de bloqueo (uBlock, AdBlock, etc.) ocultan por CSS.
-   Si el navegador lo oculta o le quita el tamaño, asumimos que
-   hay un bloqueador activo. Mientras esté activo, el contador
-   NO avanza: se congela hasta que el usuario lo desactive.
+   Se combinan DOS señales:
+   1) Un elemento "cebo" con nombres de clase típicos que las
+      listas de bloqueo ocultan por CSS (cosmetic filtering).
+   2) Una petición de red real a uno de los dominios de anuncios.
+      Muchos bloqueadores modernos (uBlock, AdGuard, etc.) actúan
+      a nivel de red y NO tocan el CSS, por eso el cebo solo no
+      basta — si la petición de red falla, también es señal de
+      bloqueo.
+   Si cualquiera de las dos señales indica bloqueo, se considera
+   bloqueado y el contador NO avanza.
    ========================================================= */
 function detectAdBlock(callback){
+  let baitBlocked = false, netBlocked = false;
+  let baitDone = false, netDone = false;
+
+  function maybeFinish(){
+    if (baitDone && netDone) callback(baitBlocked || netBlocked);
+  }
+
+  // Señal 1: cebo CSS
   const bait = document.createElement('div');
   bait.className = 'adsbox ad-banner ads adsbygoogle textads banner-ads banner_ads text-ad pub_300x250';
   bait.style.cssText = 'width:1px !important;height:1px !important;position:absolute !important;left:-9999px !important;top:-9999px !important;';
   document.body.appendChild(bait);
-
   setTimeout(()=>{
     const cs = window.getComputedStyle(bait);
-    const blocked = (bait.offsetParent === null) ||
-                     (bait.offsetHeight === 0) ||
-                     (cs.display === 'none') ||
-                     (cs.visibility === 'hidden');
+    baitBlocked = (bait.offsetParent === null) || (bait.offsetHeight === 0) ||
+                  (cs.display === 'none') || (cs.visibility === 'hidden');
     document.body.removeChild(bait);
-    callback(blocked);
-  }, 600);
+    baitDone = true;
+    maybeFinish();
+  }, 500);
+
+  // Señal 2: petición de red real a un dominio de anuncios
+  const netTimeout = setTimeout(()=>{
+    if (!netDone){ netDone = true; maybeFinish(); }
+  }, 2500);
+
+  fetch('https://www.highperformanceformat.com/d8bf2b16649b9f17c689cf7368282f85/invoke.js', { mode:'no-cors', cache:'no-store' })
+    .then(()=>{ if (!netDone){ clearTimeout(netTimeout); netDone = true; maybeFinish(); } })
+    .catch(()=>{ if (!netDone){ clearTimeout(netTimeout); netBlocked = true; netDone = true; maybeFinish(); } });
 }
 
 const adblockOverlay = document.getElementById('adblock-overlay');
